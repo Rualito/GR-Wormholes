@@ -14,6 +14,8 @@
 #include "cuErrorChecking.cuh"
 
 
+// #define DEBUG_CUDA
+
 // DOPRI5 constants
 // https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method
 __constant__ float b_factor[7]{5179./57600, 0, 7571./16695, 393./640, -92097./339200, 187./2100, 1./40};
@@ -34,7 +36,8 @@ __constant__ float c_factor[6]{1./5, 3./10, 4./5, 8./9, 1., 1.};
 // and coordinate points (could be position and/or momentum)
 // in any coordinate system
 // output has size n_coords
-extern typedef void (*ODEfunc)(int n_param, double* params, int n_coords, double* coords, double* output);
+// returns bool : true if successful 
+extern typedef bool (*ODEfunc)(int n_param, double* params, int n_coords, double* coords, double* output);
 
 // n_param: physical parameters (n_param-pointer)
 // coords0: initial conditions (n_coords-pointer)
@@ -43,33 +46,29 @@ extern typedef void (*ODEfunc)(int n_param, double* params, int n_coords, double
 // rtol: error tolerance
 // adapting step size: https://aip.scitation.org/doi/pdf/10.1063/1.4887558 expr. (4)
 // butcher tableau: https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method
-__device__
-void rk45_step(int n_param, float* params, int n_coords, float *coords0, ODEfunc f, float *step_size, float rtol, float* coords1){
-    // // TO BE CONTINUED ......
-    // adaptative step
-    // order 4-5, runge-kutta-fehlberg 
-    // check scipy.integrate.rk45 implementation
+// __device__
+// void rk45_step(int n_param, float* params, int n_coords, float *coords0, ODEfunc f, float *step_size, float rtol, float* coords1){
+//     // // TO BE CONTINUED ......
+//     // adaptative step
+//     // order 4-5, runge-kutta-fehlberg 
+//     // check scipy.integrate.rk45 implementation
 
-    float local_error = rtol*1.1;
+//     float local_error = rtol*1.1;
     
-    while(local_error>rtol){
+//     while(local_error>rtol){
         
 
 
 
 
-        step_size *= ....;
-    }
-
-
-
-
-}
+//         step_size *= ....;
+//     }
+// }
 
 
 __global__
 extern void run_DOPRI5_until(int n_param, float* params, int n_coords, float *coords0, ODEfunc f,
-int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size){
+int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, uint8_t* flag){
     // MAX_ITER: integrate until MAX_ITER rk steps have passed 
     // max_coords: conditions to run rk steps until coordinates reach absolte values (so either positive or negative)
     //  bigger than the respective values (n_coords-pointer)
@@ -79,6 +78,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     // rtol: error tolerance
     // set max_coords[:] = float_max, then no limit is taken 
     // coords[0] is time
+    // flag changed to 1 if ODE function error 
     float *coords_now = (float*) malloc(n_coords*sizeof(float));
     float *coords_temp = (float*) malloc(n_coords*sizeof(float));
 
@@ -92,7 +92,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     }
     bool stop_flag = false;
     float step = step_size;
-    
+    bool success_flag = true;
     // Runge-Kutta coefficients initialization
     float *k1 = (float*) malloc(n_coords*sizeof(float)); 
     float *k2 = (float*) malloc(n_coords*sizeof(float));
@@ -101,6 +101,8 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     float *k5 = (float*) malloc(n_coords*sizeof(float));
     float *k6 = (float*) malloc(n_coords*sizeof(float));
     float *k7 = (float*) malloc(n_coords*sizeof(float));
+
+    *flag = 0; // no error
 
     // f(n_params, params, n_coords, coords_now,k1);
     // f(n_params, params, n_coords, coords_now,k7);
@@ -116,52 +118,58 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
         //     k1[j] = k7[j];
         // }
 
+
         while(local_error>rtol){
             
             // calculate k1
-            f(n_params, params, n_coords, coords_now,k1);
+            success_flag &= f(n_params, params, n_coords, coords_now,k1);
             
             // k2
             coords_temp[0] = coords_now[0] + c_factor[0]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*a2_factor*k1[j];
             }
-            f(n_params, params, n_coords, coords_temp, k2);
+            success_flag &= f(n_params, params, n_coords, coords_temp, k2);
 
             // calculate k3
             coords_temp[0] = coords_now[0] + c_factor[1]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a3_factor[0]*k1[j]+a3_factor[1]*k2[j]);
             }
-            f(n_params, params, n_coords, coords_temp, k3);
+            success_flag &= f(n_params, params, n_coords, coords_temp, k3);
 
             // calculate k4
             coords_temp[0] = coords_now[0] + c_factor[2]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a4_factor[0]*k1[j]+a4_factor[1]*k2[j]+a4_factor[2]*k3[j]);
             }
-            f(n_params, params, n_coords, coords_temp, k4);
+            success_flag &= f(n_params, params, n_coords, coords_temp, k4);
             
             // calculate k5
             coords_temp[0] = coords_now[0] + c_factor[3]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a5_factor[0]*k1[j]+a5_factor[1]*k2[j]+a5_factor[2]*k3[j]+a5_factor[3]*k4[j]);
             }
-            f(n_params, params, n_coords, coords_temp, k5);
+            success_flag &= f(n_params, params, n_coords, coords_temp, k5);
 
             // calculate k6
             coords_temp[0] = coords_now[0] + c_factor[4]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a6_factor[0]*k1[j]+a6_factor[1]*k2[j]+a6_factor[2]*k3[j]+a6_factor[3]*k4[j]+a6_factor[4]*k5[j]);
             }
-            f(n_params, params, n_coords, coords_temp, k6);
+            success_flag &= f(n_params, params, n_coords, coords_temp, k6);
 
             // calculate k7
             coords_temp[0] = coords_now[0] + c_factor[5]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a7_factor[0]*k1[j]+a7_factor[1]*k2[j]+a7_factor[2]*k3[j]+a7_factor[3]*k4[j]+a7_factor[4]*k5[j]+a7_factor[5]*k6[j]);
             }
-            f(n_params, params, n_coords, coords_temp, k7);
+            succes_flag &= f(n_params, params, n_coords, coords_temp, k7);
+
+            if(!success_flag){ 
+                *flag = 1; // if ODE func error
+                return;
+            }
 
             // calculate coords_after and estimate error
             float error2 = 0;
@@ -180,7 +188,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
             coords_iterations[i*n_coords+k] = coords_after[k]; // saving results to array
             coords_now[k] = coords_after[k]; // changing the current coords to be new ones after the rk step
             
-            stop_flag = (stop_flag || (fabs(coords_now[k])>max_coords[k])); 
+            stop_flag |=  (fabs(coords_now[k])>max_coords[k]); 
             // if stop_flag is true, then remains always true
             // avoids if conditional
         }

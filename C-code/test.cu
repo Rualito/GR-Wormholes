@@ -279,7 +279,7 @@ int main(int argc, char ** argv){
     
     // Load basic skybox image
     int width, height, channels;
-    uint8_t *angle_img = stbi_load("saturn_horizon.jpg", &width, &height, &channels, 0);
+    uint8_t *angle_img = stbi_load("../wormhole_horizon.jpg", &width, &height, &channels, 0);
     if(angle_img == NULL){
         printf("Error in loading image\n");
         exit(1);
