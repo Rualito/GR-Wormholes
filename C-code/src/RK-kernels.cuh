@@ -66,19 +66,27 @@ extern typedef bool (*ODEfunc)(int n_param, double* params, int n_coords, double
 // }
 
 
-__global__
+
+ // MAX_ITER: integrate until MAX_ITER rk steps have passed 
+// max_coords: conditions to run rk steps until coordinates reach absolte values (so either positive or negative)
+//  bigger than the respective values (n_coords-pointer)
+// conv_iter_n: if stop conditions applied (of max_coords), then is the number of iterations until it converged (1-pointer)
+// coords_iterations: array saving all the iteration steps until either convergence or MAX_ITER (MAX_ITER*n_coords-pointer)
+// step_size: initial step size 
+// rtol: error tolerance
+// set max_coords[:] = float_max, then no limit is taken 
+// coords[0] is time
+// flag changed to 1 if ODE function error 
+
+__device__
 extern void run_DOPRI5_until(int n_param, float* params, int n_coords, float *coords0, ODEfunc f,
 int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, uint8_t* flag){
-    // MAX_ITER: integrate until MAX_ITER rk steps have passed 
-    // max_coords: conditions to run rk steps until coordinates reach absolte values (so either positive or negative)
-    //  bigger than the respective values (n_coords-pointer)
-    // conv_iter_n: if stop conditions applied (of max_coords), then is the number of iterations until it converged (1-pointer)
-    // coords_iterations: array saving all the iteration steps until either convergence or MAX_ITER (MAX_ITER-pointer)
-    // step_size: initial step size 
-    // rtol: error tolerance
-    // set max_coords[:] = float_max, then no limit is taken 
-    // coords[0] is time
-    // flag changed to 1 if ODE function error 
+   
+    // if flag is not zero, then abort
+    if(!(*flag)) {
+        return;
+    }
+    
     float *coords_now = (float*) malloc(n_coords*sizeof(float));
     float *coords_temp = (float*) malloc(n_coords*sizeof(float));
 
@@ -90,6 +98,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     for(int k=0; k<n_coords; ++k){
         coords_now[k] = coords0[k];
     }
+
     bool stop_flag = false;
     float step = step_size;
     bool success_flag = true;
@@ -198,20 +207,49 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
             break; 
         }
     }
-
-
+    
+ 
     free(coords_now);
     free(coords_after);
     free(coords_after1);
     free(coords_after2);
     free(k1);
-    free(k2;
+    free(k2);
     free(k3);
     free(k4);
     free(k5);
     free(k6);
     free(k7);
     free(coords_temp);
+}
+
+
+    
+// coordsS: coordinate start
+// coordsF: coordinate end
+// n: how many points to run between the coordinate interval
+// if n=0, it is only considered coordsS
+// absolute thread id is used to get position within coordinate grid
+// coords_iterations_range: array with size n_points*MAX_ITER*n_coords, ordered sequentially; 
+// index - coord_index  + coords_n*iteration_index + coords_n*MAX_ITER*point_index  
+// ^ such that coordinate components are grouped together, then iteration results, and finally diferent points of simulations  
+__global__ 
+extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc f,
+int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) {
+    // TODO
+
+    const int index_x = blockIdx.x*blockDim.x+threadIdx.x;
+
+    float *coords0 = (float*) malloc(n_coords*sizeof(float));
+
+    // compute the starting coordinate of current thread
+    for(int i=0; i<n_coords; ++i){
+        coords0[i] = coordsS[i] + ((coordsF[i]-coordsS[i]) * index_x)/n_points;
+    }
+
+    run_DOPRI5_until(n_param, params, n_coords, coords0, f, MAX_ITER, max_coords, 
+        &conv_iter_n[index_x] ,&coords_iterations_range[coords_n*MAX_ITER*index_x], step_size, flag);
+
 }
 
 
