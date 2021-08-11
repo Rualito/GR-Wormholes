@@ -14,6 +14,9 @@
 
 #include "limits.h"
 
+#include <iostream>
+#include <fstream>
+
 // THIS WORKS, DON'T TWEAK THIS
 #define IMG_INDEX(i,j,k, width, height, channels) ((j)*(width)*(channels)+(i)*(channels)+(k))
 // channels should always be 4
@@ -39,7 +42,7 @@
 #define MAX_ITER 2048
 
 
-typedef bool (*ODEfunc)(int n_param, double* params, int n_coords, double* coords, double* output);
+typedef bool (*ODEfunc)(int n_param, float* params, int n_coords, float* coords, float* output);
 
 __device__
 bool ode_test(int n_params, float *params, int n_coords, float* coords, float *output){
@@ -70,30 +73,32 @@ int main(int argc, char** argv){
     // time, x, y
     float pointsS[3]{0,0.,1.};
     float pointsF[3]{0,1.,0.}; 
+    printf("Beginning\n");
 
     // memory on graphics card
-    float *params;
+    float *params = new float[1];
     *params = 2*PI;
     float *d_params; // device parameters
     cudaMalloc( (void**) &d_params, 1*sizeof(float));
     cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
-
+    printf("params done\n");
     float *d_coordsS; // device coordinates
     cudaMalloc( (void**) &d_coordsS, 3*sizeof(float));
-    cudaMemcpy(d_coordsS, pointsS, 3*sizeof(float), cudaMemcpyHostToDevice));
+    cudaMemcpy(d_coordsS, pointsS, 3*sizeof(float), cudaMemcpyHostToDevice);
 
     float *d_coordsF; 
     cudaMalloc( (void**) &d_coordsF, 3*sizeof(float));
-    cudaMemcpy(d_coordsF, pointsF, 3*sizeof(float), cudaMemcpyHostToDevice));
+    cudaMemcpy(d_coordsF, pointsF, 3*sizeof(float), cudaMemcpyHostToDevice);
+    printf("cordsF done\n");
 
     float *integration_results = (float*) malloc(n_points*MAX_ITER*3*sizeof(float));
     float *d_integration_results;
     cudaMalloc( (void**) &d_integration_results, n_points*MAX_ITER*3*sizeof(float));
 
     float *integration_end = (float*) malloc(n_points*sizeof(float));
-    float *d_integration_end;
-    cudaMalloc( (void**) &d_integration_end, n_points*sizeof(float));
-
+    int *d_integration_end;
+    cudaMalloc( (void**) &d_integration_end, n_points*sizeof(int));
+    printf("integration_... done\n");
 
     float *max_coords = (float*) malloc(3*sizeof(float));
     max_coords[0] = 10; // 10 time units of integration
@@ -102,9 +107,14 @@ int main(int argc, char** argv){
     
     float *d_max_coords;
     cudaMalloc((void**) &d_max_coords, 3*sizeof(float));
-    cudaMemcpy(d_max_coords, max_coords, 3*sizeof(float));
+    cudaMemcpy(d_max_coords, max_coords, 3*sizeof(float), cudaMemcpyHostToDevice);
+    printf("max_coords done\n");
+    uint8_t *flag = new uint8_t[1];
+    *flag = 0;
     uint8_t *d_flag;
-    
+    cudaMalloc((void**) &d_flag, sizeof(uint8_t));
+    cudaMemcpy(d_flag, flag, sizeof(uint8_t), cudaMemcpyHostToDevice);
+
     // cudaMemcpy(d_coords0, coords0, 2*sizeof(float), cudaMemcpyHostToDevice);
     // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
 
@@ -117,13 +127,17 @@ int main(int argc, char** argv){
 
 
     float initial_step_size = 1.0e-4f;
-
+    float rtol = 1.0e-6;
+    
+    dim3 blocks = BLOCKS(n_points);
+    dim3 threads = THREADS(n_points);
+    printf("Before CUDA\n");
     BENCHMARK_START(0);
     // https://stackoverflow.com/questions/49946929/pass-function-as-parameter-in-cuda-with-static-pointers
     //extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc f,
     //   int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) 
-    run_DOPRI5_coord0_range_until<<<BLOCKS(n_points), THREADS(n_points)>>>(1, d_params, 2, d_coordsS, d_coordsF, n_points, d_ode_test_f, 
-        MAX_ITER, d_max_coords, d_integration_end, d_integration_results, initial_step_size, d_flag);
+    run_DOPRI5_coord0_range_until<<<blocks, threads>>>(1, d_params, 3, d_coordsS, d_coordsF, n_points, d_ode_test_f, 
+        MAX_ITER, d_max_coords, d_integration_end, d_integration_results, initial_step_size, rtol,d_flag);
     
     // can do for loop, change d_params and iterate
     // *params = 2;
@@ -137,10 +151,40 @@ int main(int argc, char** argv){
     // obtaining the results from the device
     cudaMemcpy(integration_results, d_integration_results, n_points*MAX_ITER*3*sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(integration_end, d_integration_end, n_points*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(flag, d_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
     
+    printf("After CUDA\n");
+
+    printf("Result flag: %d\n", flag);
+
+    std::ofstream outdata;
+    outdata.open("integration_results.dat");
+    if(!outdata){
+        printf("Can't open file to write results\n");
+        exit(1);
+    }
+    float coord0[3];
+    for(int i=0; i<n_points; ++i){ // for each requested point
+        outdata << "New point coordinate " << i << "\n";
+        for(int k=0; k<3; ++k){
+            float coord_now = pointsS[k] + ((pointsF[k]-pointsF[k]) * i*1.0) / n_points;
+            outdata << coord_now << " ";
+        } 
+        outdata <<  "\n";
+
+        for(int j=0; j<integration_end[i]; ++j){ // throughout the simulation results
+            for(int k=0; k<3; ++k){
+                outdata << integration_results[3*MAX_ITER*i + j*3+k] << " ";
+                // 3 coordinates
+            }
+            outdata << "\n";
+        }
+        outdata << "\n";
+    }
+
     //    T O  D O
     // saving the results to a file, to be later intrepreted by some python code (easier to draw)
-    
+        
 
     cudaFree(d_coordsS);
     cudaFree(d_coordsF);
@@ -148,7 +192,10 @@ int main(int argc, char** argv){
     cudaFree(d_integration_end);
     cudaFree(d_ode_test_f);
     cudaFree(d_max_coords);
+    cudaFree(d_flag);
 
+    delete params;
+    delete flag;
     free(integration_results);
     free(integration_end);
     free(max_coords);

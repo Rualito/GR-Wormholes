@@ -37,7 +37,7 @@ __constant__ float c_factor[6]{1./5, 3./10, 4./5, 8./9, 1., 1.};
 // in any coordinate system
 // output has size n_coords
 // returns bool : true if successful 
-extern typedef bool (*ODEfunc)(int n_param, double* params, int n_coords, double* coords, double* output);
+typedef bool (*ODEfunc)(int n_param, float* params, int n_coords, float* coords, float* output);
 
 // n_param: physical parameters (n_param-pointer)
 // coords0: initial conditions (n_coords-pointer)
@@ -79,8 +79,8 @@ extern typedef bool (*ODEfunc)(int n_param, double* params, int n_coords, double
 // flag changed to 1 if ODE function error 
 
 __device__
-extern void run_DOPRI5_until(int n_param, float* params, int n_coords, float *coords0, ODEfunc f,
-int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, uint8_t* flag){
+extern void run_DOPRI5_until(int n_params, float* params, int n_coords, float *coords0, ODEfunc* f,
+int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, float rtol,uint8_t* flag){
    
     // if flag is not zero, then abort
     if(!(*flag)) {
@@ -93,14 +93,14 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     float *coords_after = (float*) malloc(n_coords*sizeof(float));
     
     float *coords_after1 = (float*) malloc(n_coords*sizeof(float));
-    float *coords_after2 = (float*) malloc(n_coords*sizeof(float));
+    //float *coords_star = (float*) malloc(n_coords*sizeof(float));
     // initial coordinates
     for(int k=0; k<n_coords; ++k){
         coords_now[k] = coords0[k];
     }
 
     bool stop_flag = false;
-    float step = step_size;
+    // float step = step_size;
     bool success_flag = true;
     // Runge-Kutta coefficients initialization
     float *k1 = (float*) malloc(n_coords*sizeof(float)); 
@@ -131,49 +131,49 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
         while(local_error>rtol){
             
             // calculate k1
-            success_flag &= f(n_params, params, n_coords, coords_now,k1);
+            success_flag &= (*f)(n_params, params, n_coords, coords_now,k1);
             
             // k2
             coords_temp[0] = coords_now[0] + c_factor[0]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*a2_factor*k1[j];
             }
-            success_flag &= f(n_params, params, n_coords, coords_temp, k2);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k2);
 
             // calculate k3
             coords_temp[0] = coords_now[0] + c_factor[1]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a3_factor[0]*k1[j]+a3_factor[1]*k2[j]);
             }
-            success_flag &= f(n_params, params, n_coords, coords_temp, k3);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k3);
 
             // calculate k4
             coords_temp[0] = coords_now[0] + c_factor[2]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a4_factor[0]*k1[j]+a4_factor[1]*k2[j]+a4_factor[2]*k3[j]);
             }
-            success_flag &= f(n_params, params, n_coords, coords_temp, k4);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k4);
             
             // calculate k5
             coords_temp[0] = coords_now[0] + c_factor[3]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a5_factor[0]*k1[j]+a5_factor[1]*k2[j]+a5_factor[2]*k3[j]+a5_factor[3]*k4[j]);
             }
-            success_flag &= f(n_params, params, n_coords, coords_temp, k5);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k5);
 
             // calculate k6
             coords_temp[0] = coords_now[0] + c_factor[4]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a6_factor[0]*k1[j]+a6_factor[1]*k2[j]+a6_factor[2]*k3[j]+a6_factor[3]*k4[j]+a6_factor[4]*k5[j]);
             }
-            success_flag &= f(n_params, params, n_coords, coords_temp, k6);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k6);
 
             // calculate k7
             coords_temp[0] = coords_now[0] + c_factor[5]*step_size;
             for(int j=1; j<n_coords; ++j){
                 coords_temp[j] = coords_now[j] + step_size*(a7_factor[0]*k1[j]+a7_factor[1]*k2[j]+a7_factor[2]*k3[j]+a7_factor[3]*k4[j]+a7_factor[4]*k5[j]+a7_factor[5]*k6[j]);
             }
-            succes_flag &= f(n_params, params, n_coords, coords_temp, k7);
+            success_flag &= (*f)(n_params, params, n_coords, coords_temp, k7);
 
             if(!success_flag){ 
                 *flag = 1; // if ODE func error
@@ -183,9 +183,10 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
             // calculate coords_after and estimate error
             float error2 = 0;
             coords_after1[0] = coords_now[0] + step_size;
+            
             for(int j=1; i<n_coords; ++j){
                 coords_after[j] = coords_now[j] + step_size*(b_factor[0]*k1[j]+b_factor[1]*k2[j]+b_factor[2]*k3[j]+b_factor[3]*k4[j]+b_factor[4]*k5[j]+b_factor[5]*k6[j]+b_factor[6]*k7[j]);
-                coords_star = coords_now[j] + step_size*(b_star_factor[0]*k1[j]+b_star_factor[1]*k2[j]+b_star_factor[2]*k3[j]+b_star_factor[3]*k4[j]+b_star_factor[4]*k5[j]+b_star_factor[5]*k6[j]);
+                float coords_star = coords_now[j] + step_size*(b_star_factor[0]*k1[j]+b_star_factor[1]*k2[j]+b_star_factor[2]*k3[j]+b_star_factor[3]*k4[j]+b_star_factor[4]*k5[j]+b_star_factor[5]*k6[j]);
                 error2 += (coords_after[j]-coords_star)*(coords_after[j]-coords_star);
             }
             local_error = sqrt(error2);
@@ -212,7 +213,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
     free(coords_now);
     free(coords_after);
     free(coords_after1);
-    free(coords_after2);
+    //free(coords_star);
     free(k1);
     free(k2);
     free(k3);
@@ -234,8 +235,8 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, flo
 // index - coord_index  + coords_n*iteration_index + coords_n*MAX_ITER*point_index  
 // ^ such that coordinate components are grouped together, then iteration results, and finally diferent points of simulations  
 __global__ 
-extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc f,
-int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) {
+extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc* f,
+int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size,float rtol, uint8_t* flag) {
     // TODO
 
     const int index_x = blockIdx.x*blockDim.x+threadIdx.x;
@@ -248,7 +249,7 @@ int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_rang
     }
 
     run_DOPRI5_until(n_param, params, n_coords, coords0, f, MAX_ITER, max_coords, 
-        &conv_iter_n[index_x] ,&coords_iterations_range[coords_n*MAX_ITER*index_x], step_size, flag);
+        &conv_iter_n[index_x] ,&coords_iterations_range[n_coords*MAX_ITER*index_x], step_size, rtol, flag);
 
 }
 
