@@ -53,7 +53,8 @@ uint8_t* get_pixel(uint8_t *angle_img, int width, int height, int channels, doub
 
 // This function should be paralelized with cuda
 void generate_view(uint8_t *angle_img, int width, int height, int channels, 
-    double phi0, double th0, uint8_t *view,  int view_width, int view_height, double fov, uint8_t* texture_pixels=NULL, bool onlyTexture=false){
+    double phi0, double th0, uint8_t *view,  int view_width, int view_height, 
+    double fov, uint8_t* texture_pixels=NULL, bool onlyTexture=false){
     ECHOS;
     double Dphi = fov;
     // double Dth = (height*fov)/width;

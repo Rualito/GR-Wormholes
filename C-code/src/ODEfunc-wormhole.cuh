@@ -21,7 +21,7 @@ bool __cuda_ode_func__(int n_params, float *params, int n_coords, float* coords,
     if (n_params<5 | n_coords<6){
         return false;
     }
-
+    
     // coords: 
     // [0] : t - time
     // [1] : l - distance thrugh wormhole
@@ -39,7 +39,7 @@ bool __cuda_ode_func__(int n_params, float *params, int n_coords, float* coords,
 
     float l = coords[1];
     float th = coords[2];
-    float phi = coords[3];
+    // float phi = coords[3];
     float pl = coords[4];
     float pth = coords[5];
     
@@ -56,17 +56,25 @@ bool __cuda_ode_func__(int n_params, float *params, int n_coords, float* coords,
 
     float x = 2*(fabs(l)-a)/(PI*M);
 
-    int inside_condition = fabs(l)>a; // 1 or 0 if condition is satisfied
+    int inside_condition = (fabs(l)>a ? 1 : 0); // 1 or 0 if condition is satisfied
 
-    float r = rho + M*(x*atan(x) - 0.5*log(1f+x*x)) * inside_condition;
-    float drdl = atan(x) * 2/PI * (l>0? 1: -1) * inside_condition; 
+    float r = rho + inside_condition * M * (x*atan(x) - 0.5*log(1+x*x));
+    float drdl = atan(x) * 2/PI * (l>0 ? 1.0: -1.0) * inside_condition; 
 
     output[0] = 1; // time step iteration
     output[1] = pl; // dl/dt 
     output[2] = pth/(r*r); // dth/dt
     output[3] = b/(r*r*sth*sth); //  dphi/dt
-    output[4] = B*B*drdl/(r*r*r)  // dpl/dt
+    output[4] = B*B*drdl/(r*r*r);  // dpl/dt
     output[5] = b*b*cth/(r*r*sth*sth*sth); // dpth/dt
+
+    // for(int i=0; i<6; ++i){
+    //     if(isnan(output[i])){
+    //         printf("Coordinate %d is nan, th: %f, r: %f, drdl: %f\n", i, th, r, drdl);
+    //         printf("Params: M: %f, a: %f, rho: %f\n", M, a, rho);
+    //         return false;
+    //     }
+    // }
 
     return true;
 }

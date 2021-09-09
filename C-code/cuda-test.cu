@@ -27,6 +27,7 @@
 #define BLOCKS(N) dim3((N>THREADS_PER_BLOCK?N/THREADS_PER_BLOCK:1),1,1);
 
 
+
 #define BENCHMARK
 #include "BenchMark.hpp"
 
@@ -41,8 +42,7 @@
 
 #include "RK-kernels.cuh"
 
-#define MAX_ITER 2048
-
+#define MAX_ITER 16384
 
 
 __global__ 
@@ -54,11 +54,9 @@ void print_index() {
 }
 
 
-
-
 int main(void) {
 
-    int n_threads = 1<<3;
+    int n_threads = 1<<7;
     dim3 blocks = BLOCKS(n_threads);
     dim3 threads = THREADS(n_threads);
 
@@ -79,7 +77,7 @@ int main(void) {
     float *d_coordsF; 
     cudaMalloc( (void**) &d_coordsF, 3*sizeof(float));
     cudaMemcpy(d_coordsF, pointsF, 3*sizeof(float), cudaMemcpyHostToDevice);
-    printf("cordsF done\n");
+    // printf("cordsF done\n");
 
     float *integration_results = (float*) malloc(n_threads*MAX_ITER*3*sizeof(float));
     float *d_integration_results;
@@ -88,35 +86,34 @@ int main(void) {
     int *integration_end = (int*) malloc(n_threads*sizeof(int));
     int *d_integration_end;
     cudaMalloc( (void**) &d_integration_end, n_threads*sizeof(int));
-    printf("integration_... done\n");
+    // printf("integration_... done\n");
 
     float *max_coords = (float*) malloc(3*sizeof(float));
     max_coords[0] = 10; // 10 time units of integration
     max_coords[1] = std::numeric_limits<float>::max();
     max_coords[2] = std::numeric_limits<float>::max();
     
-
     float *d_max_coords;
     cudaMalloc((void**) &d_max_coords, 3*sizeof(float));
     cudaMemcpy(d_max_coords, max_coords, 3*sizeof(float), cudaMemcpyHostToDevice);
-    printf("max_coords done\n");
+    // printf("max_coords done\n");
     uint8_t *flag = new uint8_t[1];
     *flag = 0;
     uint8_t *d_flag;
     cudaMalloc((void**) &d_flag, sizeof(uint8_t));
     cudaMemcpy(d_flag, flag, sizeof(uint8_t), cudaMemcpyHostToDevice);
-    printf("flag done\n");
+    // printf("flag done\n");
     // cudaMemcpy(d_coords0, coords0, 2*sizeof(float), cudaMemcpyHostToDevice);
     // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
-
-
-    float initial_step_size = 1.0e-4f;
-    float rtol = 1.0e-6f;
-
-
+      
+    // aaa
+    float initial_step_size = 1.0e-2f;
+    float rtol = 1.0e-8f;  
+   
+ 
     BENCHMARK_START(0);
     // https://stackoverflow.com/questions/49946929/pass-function-as-parameter-in-cuda-with-static-pointers
-    //extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_threads, ODEfunc f,
+    //extern void run_DOPRI5_coord0_range_until(int n_parSam, float* params, int n_coords, float *coordsS, float *coordsF, int n_threads, ODEfunc f,
     //   int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) 
     run_DOPRI5_coord0_range_until<<<blocks, threads>>>(1, d_params, 3, d_coordsS, d_coordsF, n_threads, 
         MAX_ITER, d_max_coords, d_integration_end, d_integration_results, initial_step_size, rtol, d_flag);
@@ -126,12 +123,15 @@ int main(void) {
     // *params = 2;
     // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
-    
     BENCHMARK_END(0);
 
+    BENCHMARK_START(1);
+    // timing also the data import    
     cudaMemcpy(integration_results, d_integration_results, n_threads*MAX_ITER*3*sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(integration_end, d_integration_end, n_threads*sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(flag, d_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
+    BENCHMARK_END(1);
+    
     
 
     printf("Result flag: %x\n", *flag);
@@ -143,6 +143,8 @@ int main(void) {
         exit(1);
     }
 
+
+    BENCHMARK_START(2);
     for(int i=0; i<n_threads; ++i){ // for each requested point
         outdata << "New point coordinate " << i << "\n";
         for(int k=0; k<3; ++k){
@@ -160,7 +162,7 @@ int main(void) {
         }
         outdata << "\n";
     }
-
+    BENCHMARK_END(2);
 
 
 

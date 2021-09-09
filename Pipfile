@@ -9,6 +9,7 @@ matplotlib = "*"
 ipykernel = "*"
 ipyvolume = "*"
 pillow = "*"
+numpy = "*"
 
 [dev-packages]
 
