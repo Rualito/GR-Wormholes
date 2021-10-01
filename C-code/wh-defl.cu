@@ -54,101 +54,101 @@
 
 
 // end_coords have size n_coords*n_threads; correspond to the final position when simulation stops, either at max_l or MAX_ITER
-void compute_wormhole_deflections(int n_threads, float *coord_array, float*params_array, float max_l, float* end_coords) {
-    const int n_coords = 6; 
-    const int n_params = 5;
+// void compute_wormhole_deflections(int n_threads, float *coord_array, float*params_array, float max_l, float* end_coords) {
+//     const int n_coords = 6; 
+//     const int n_params = 5;
     
-    // memory on graphics card
-    float *d_params_array; // device parameters
-    cudaMalloc( (void**) &d_params_array, n_points*n_params*sizeof(float));
-    cudaMemcpy(d_params_array, params_array, n_points*n_params*sizeof(float), cudaMemcpyHostToDevice);
+//     // memory on graphics card
+//     float *d_params_array; // device parameters
+//     cudaMalloc( (void**) &d_params_array, n_points*n_params*sizeof(float));
+//     cudaMemcpy(d_params_array, params_array, n_points*n_params*sizeof(float), cudaMemcpyHostToDevice);
     
-    float *d_coord_array; // device coordinates
-    cudaMalloc( (void**) &d_coord_array, n_points*n_coords*sizeof(float));
-    cudaMemcpy(d_coord_array, coord_array, n_points*n_coords*sizeof(float), cudaMemcpyHostToDevice);
+//     float *d_coord_array; // device coordinates
+//     cudaMalloc( (void**) &d_coord_array, n_points*n_coords*sizeof(float));
+//     cudaMemcpy(d_coord_array, coord_array, n_points*n_coords*sizeof(float), cudaMemcpyHostToDevice);
 
-    float *integration_results = (float*) malloc(n_points*MAX_ITER*n_coords*sizeof(float));
-    float *d_integration_results;
-    cudaMalloc( (void**) &d_integration_results, n_points*MAX_ITER*n_coords*sizeof(float));
+//     float *integration_results = (float*) malloc(n_points*MAX_ITER*n_coords*sizeof(float));
+//     float *d_integration_results;
+//     cudaMalloc( (void**) &d_integration_results, n_points*MAX_ITER*n_coords*sizeof(float));
 
-    int *integration_end = (int*) malloc(n_points*sizeof(int));
-    int *d_integration_end;
-    cudaMalloc( (void**) &d_integration_end, n_points*sizeof(int));
+//     int *integration_end = (int*) malloc(n_points*sizeof(int));
+//     int *d_integration_end;
+//     cudaMalloc( (void**) &d_integration_end, n_points*sizeof(int));
 
-    float *max_coords = new float[n_coords];
-    max_coords[0] = std::numeric_limits<float>::max(); 
-    max_coords[1] = max_l;
-    max_coords[2] = std::numeric_limits<float>::max();
-    max_coords[3] = std::numeric_limits<float>::max();
-    max_coords[4] = std::numeric_limits<float>::max();
-    max_coords[5] = std::numeric_limits<float>::max();
+//     float *max_coords = new float[n_coords];
+//     max_coords[0] = std::numeric_limits<float>::max(); 
+//     max_coords[1] = max_l;
+//     max_coords[2] = std::numeric_limits<float>::max();
+//     max_coords[3] = std::numeric_limits<float>::max();
+//     max_coords[4] = std::numeric_limits<float>::max();
+//     max_coords[5] = std::numeric_limits<float>::max();
     
-    float *d_max_coords;
-    cudaMalloc((void**) &d_max_coords, n_coords*sizeof(float));
-    cudaMemcpy(d_max_coords, max_coords, n_coords*sizeof(float), cudaMemcpyHostToDevice);
+//     float *d_max_coords;
+//     cudaMalloc((void**) &d_max_coords, n_coords*sizeof(float));
+//     cudaMemcpy(d_max_coords, max_coords, n_coords*sizeof(float), cudaMemcpyHostToDevice);
     
-    uint8_t *flag = new uint8_t[1];
-    *flag = 0;
-    uint8_t *d_flag;
-    cudaMalloc((void**) &d_flag, sizeof(uint8_t));
-    cudaMemcpy(d_flag, flag, sizeof(uint8_t), cudaMemcpyHostToDevice);
+//     uint8_t *flag = new uint8_t[1];
+//     *flag = 0;
+//     uint8_t *d_flag;
+//     cudaMalloc((void**) &d_flag, sizeof(uint8_t));
+//     cudaMemcpy(d_flag, flag, sizeof(uint8_t), cudaMemcpyHostToDevice);
     
-    // cudaMemcpy(d_coords0, coords0, 2*sizeof(float), cudaMemcpyHostToDevice);
-    // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
-    // a
-    float initial_step_size = 2.0e-1f;
-    float rtol = 1.0e-2f;  
+//     // cudaMemcpy(d_coords0, coords0, 2*sizeof(float), cudaMemcpyHostToDevice);
+//     // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
+//     // a
+//     float initial_step_size = 2.0e-1f;
+//     float rtol = 1.0e-2f;  
     
-    dim3 blocks = BLOCKS(n_points);
-    dim3 threads = THREADS(n_points);
-    printf("Before CUDA\n");
-    BENCHMARK_START(0);
-    // https://stackoverflow.com/questions/49946929/pass-function-as-parameter-in-cuda-with-static-pointers
-    //extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc f,
-    //   int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) 
+//     dim3 blocks = BLOCKS(n_points);
+//     dim3 threads = THREADS(n_points);
+//     printf("Before CUDA\n");
+//     BENCHMARK_START(0);
+//     // https://stackoverflow.com/questions/49946929/pass-function-as-parameter-in-cuda-with-static-pointers
+//     //extern void run_DOPRI5_coord0_range_until(int n_param, float* params, int n_coords, float *coordsS, float *coordsF, int n_points, ODEfunc f,
+//     //   int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations_range, float step_size, uint8_t* flag) 
 
-    run_DOPRI5_coord_arr_until<<<blocks, threads>>>(n_params, d_params_array, n_coords, d_coord_array,  
-        MAX_ITER, d_max_coords, d_integration_end, d_integration_results, initial_step_size, rtol, d_flag);
-    gpuErrchk(cudaGetLastError(), false);
+//     run_DOPRI5_coord_arr_until<<<blocks, threads>>>(n_params, d_params_array, n_coords, d_coord_array,  
+//         MAX_ITER, d_max_coords, d_integration_end, d_integration_results, initial_step_size, rtol, d_flag);
+//     gpuErrchk(cudaGetLastError(), false);
     
-    // can do for loop, change d_params and iterate
-    // *params = 2;
-    // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
+//     // can do for loop, change d_params and iterate
+//     // *params = 2;
+//     // cudaMemcpy(d_params, params, 1*sizeof(float), cudaMemcpyHostToDevice);
+//     cudaDeviceSynchronize();
     
-    BENCHMARK_END(0);
+//     BENCHMARK_END(0);
 
-    BENCHMARK_START(1);
-    // obtaining the results from the device
-    cudaMemcpy(integration_results, d_integration_results, n_points*MAX_ITER*n_coords*sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(integration_end, d_integration_end, n_points*sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(flag, d_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
-    BENCHMARK_END(1);
+//     BENCHMARK_START(1);
+//     // obtaining the results from the device
+//     cudaMemcpy(integration_results, d_integration_results, n_points*MAX_ITER*n_coords*sizeof(float), cudaMemcpyDeviceToHost);
+//     cudaMemcpy(integration_end, d_integration_end, n_points*sizeof(int), cudaMemcpyDeviceToHost);
+//     cudaMemcpy(flag, d_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
+//     BENCHMARK_END(1);
 
-    printf("Result flag: %x\n", *flag);
+//     printf("Result flag: %x\n", *flag);
 
-    for(int i=0; i<n_points; i++){
-        for(int j=0; j<n_coords; j++){
-            int iteration_end = integration_end[i]-1;
-            end_coords[i*n_coords+k] = integration_results[iteration_end*n_coords+k];
-        }
-    }
+//     for(int i=0; i<n_points; i++){
+//         for(int j=0; j<n_coords; j++){
+//             int iteration_end = integration_end[i]-1;
+//             end_coords[i*n_coords+k] = integration_results[iteration_end*n_coords+k];
+//         }
+//     }
 
-    cudaFree(d_coord_array);
-    cudaFree(d_params_array);
-    cudaFree(d_integration_results);
-    cudaFree(d_integration_end);
-    cudaFree(d_max_coords);
-    cudaFree(d_flag);
+//     cudaFree(d_coord_array);
+//     cudaFree(d_params_array);
+//     cudaFree(d_integration_results);
+//     cudaFree(d_integration_end);
+//     cudaFree(d_max_coords);
+//     cudaFree(d_flag);
 
-    delete flag;
-    free(integration_results);
-    free(integration_end);
+//     delete flag;
+//     free(integration_results);
+//     free(integration_end);
 
-    // delete[] coord_array;
-    // delete[] params_array;
-    delete[] max_coords;
-}
+//     // delete[] coord_array;
+//     // delete[] params_array;
+//     delete[] max_coords;
+// }
 
 // int main(int argc, char** argv){
 //     // Calculating phi range deflections
@@ -228,7 +228,7 @@ int main(int argc, char** argv){
     // Calculating phi range deflections
     printf("ODE: %s\n", __cuda_ode_func_name_d__);
 
-    const int n_points = 128; // n_threads
+    const int n_points = 2048; // n_threads
     const int n_coords = 6; 
     const int n_params = 5;
 

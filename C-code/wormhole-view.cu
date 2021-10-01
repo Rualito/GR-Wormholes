@@ -170,15 +170,39 @@ int main(int argc, char** argv){
 
     const float l0 = 100;
 
+    // coordinates and parameters necessary for the calculation of the ODE
+    // check file ODEfunc-wormhole.cuh to verify these are the right coordinates and parameters
+    // coords: 
+    // [0] : t - time
+    // [1] : l - distance thrugh wormhole
+    // [2] : th - theta, altitude angle
+    // [3] : phi - azimuth angle
+    // [4] : pl - radial direction of light momentum
+    // [5] : pth - polar direction of light momentum  
+
+    // params: 
+    // [0] : M - wormhole mass
+    // [1] : a - wormhole throat length
+    // [2] : rho - wormhole throat radius
+    // [3] : pphi - azimuthal direction of light momentum, constant (implemented this way to be variable through threads)
+    // [4] : B - impact parameter relative to center, also constant, same reason and avoiding to calculate sqrt each time
+
     const int n_coords = 6; 
     const int n_params = 5;
+
+    // photon_params are the essential parameters needed to attribute each point on screen
+    // [0] : l - distance along the wormhole metric
+    // [1] : photon_phi - orientation along the xy plane of the observer photon
+    // observer position given by phi and theta are not necessary due to spherical symmetry
+    const int n_photon_params = 2;
 
     //                 Obtaining the initial coordinates to integrate from
 
     float *coord_array = new float[n_points*n_coords]; 
     float *params_array = new float[n_points*n_params];
     float *end_coords = new float[n_points*n_coords];
-
+    float *photon_params = new float[n_points*n_photon_params];
+    
     float t0 = 0;
     // position in altered spherical coordinates
     // float l0 = 100;
@@ -187,6 +211,9 @@ int main(int argc, char** argv){
     
     for(int i=0; i<n_points; ++i){ // constructing coord_array and params_array to run in the experiments
         // momentum direction // on the xz plane, along pl and pphi
+        // z axis points to the wormhole, y is along 
+        // x : pphi
+        // z : pl
         float p = 1; // absolute value of momentum  
         float p_dir_phi = 0; 
         float p_dir_th = (PI*i)/n_points; // direction along xz plane varies for multiple experiments
@@ -207,6 +234,9 @@ int main(int argc, char** argv){
         for(int j=0; j<n_params; ++j){
             params_array[i*n_params+j] = params[j]; 
         }
+
+        photon_params[i*n_photon_params+0] = l0;
+        photon_params[i*n_photon_params+1] = p_dir_th;
     }
 
     //                         Integrating the ODE and obtaining the results (end_coords)
@@ -214,6 +244,11 @@ int main(int argc, char** argv){
     compute_wormhole_deflections(n_points, coord_array, params_array, max_l, end_coords); 
 
 
+    //             Important values for ray tracing:
+    // l0, p_dir_phi, p_dir_th
+
+
+    int width, heigh, channels;
 
 
     delete[] end_coords;
