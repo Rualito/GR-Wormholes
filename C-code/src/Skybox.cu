@@ -8,10 +8,20 @@
 
 // a fudge parameter because I am lazy
 #ifndef SKYCUBE_FILETYPE
-#define SKYCUBE_FILETYPE ".jpg" 
+#define SKYCUBE_FILETYPE ".png" 
 #endif
 
 #define IMG_INDEX(i,j,k, width, height, channels) ((j)*(width)*(channels)+(i)*(channels)+(k))
+
+#define THREADS_PER_BLOCK 16 // 1 dimensional thread blocks
+#define THREADS(N) dim3((THREADS_PER_BLOCK<N?THREADS_PER_BLOCK:N),1,1);
+#define BLOCKS(N) dim3((N>THREADS_PER_BLOCK?N/THREADS_PER_BLOCK:1),1,1);
+
+__host__ __device__ 
+float interval_mod(float x, float x0, float x1){
+    return fmod(x-x0, x1) + x0;
+}
+
 
 
 Skybox::Skybox(const char* filename, bool is_cube, float offset_phi, float offset_th, bool cuda_speedup){
@@ -83,8 +93,72 @@ Skybox::Skybox(const char* filename, bool is_cube, float offset_phi, float offse
 
 }
 
+Skybox::Skybox(const Skybox& skybox) {
+    this->__offset_phi = skybox.__offset_phi;
+    this->__offset_th = skybox.__offset_th;
+    this->__is_cube = skybox.__is_cube;
+    this->__cuda_speedup = skybox.__cuda_speedup;
+    this->__width = skybox.__width;
+    this->__height = skybox.__height;
+    this->__channels = skybox.__channels;
+
+    if(__is_cube) {
+        __img = NULL;
+        // __img_up = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // __img_down = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // __img_front = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // __img_back = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // __img_left = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // __img_right = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_up,skybox.__img_up, sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_down,skybox.__img_down, sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_front,skybox.__img_front, sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_back,skybox.__img_back, sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_left,skybox.__img_left, sizeof(uint8_t)*__width*__height*__channels);
+        // memcpy(__img_right,skybox.__img_right, sizeof(uint8_t)*__width*__height*__channels);
+        copy_image(__img_up,skybox.__img_up,__d_img_up);
+        copy_image(__img_down,skybox.__img_up,__d_img_down);
+        copy_image(__img_front,skybox.__img_up,__d_img_front);
+        copy_image(__img_back,skybox.__img_up,__d_img_back);
+        copy_image(__img_left,skybox.__img_up,__d_img_left);
+        copy_image(__img_right,skybox.__img_up,__d_img_right);
+    } else {
+        copy_image(__img,skybox.__img_up,__d_img);
+        
+        __img_up = NULL;
+        __img_down = NULL;
+        __img_front = NULL;
+        __img_back = NULL;
+        __img_left = NULL;
+        __img_right = NULL;
+
+    }
+
+}
+
+void Skybox::copy_image(uint8_t* _img_, uint8_t* _img_origin, uint8_t* _d_img_){
+
+    _img_ = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+    memcpy(_img_,_img_origin, sizeof(uint8_t)*__width*__height*__channels);
+
+    if(__cuda_speedup){
+        cudaMalloc( (void**) &_d_img_, __width*__height*__channels*sizeof(uint8_t));
+        cudaMemcpy(_d_img, _img_, __width*__height*__channels*sizeof(uint8_t), cudaMemcpyHostToDevice);
+    }
+}
+
+
 void Skybox::initialize_image(const char* filename, uint8_t* img, uint8_t* d_img){
-    img = stbi_load(filename, &__width, &__height, &__channels, 0);
+    
+    uint8_t *img_temp = stbi_load(filename, &__width, &__height, &__channels, 0);
+    img = (uint8_t*) malloc(sizeof(uint8_t)*__width*__height*__channels);
+
+    memcpy(img, img_temp, __width*__height*__channels*sizeof(uint8_t));
+
+    // NOTE: it is possible that each stbi_load points to the same pointer (static pointer)
+    // in that case, each image from CPU will be the same 
+    // This is a possible bug to be aware in the future.
+    // ------ Now this should be fixed (not tested)
 
     if(img == NULL){
         printf("Error loading image: %s\n", filename);
@@ -119,14 +193,15 @@ Skybox::~Skybox(){
 
 // phi, th rotstion values for each face
 // operation: rotate face back to front
-__constant__ float rot_F[2]{0,0};
-__constant__ float rot_B[2]{-PI, 0};
 
-__constant__ float rot_R[2]{PI/2, 0};
-__constant__ float rot_L[2]{-PI/2, 0};
+__host__ __device__ __constant__ float rot_F[2]{0,0};
+__host__ __device__ __constant__ float rot_B[2]{-PI, 0};
+ 
+__host__ __device__ __constant__ float rot_R[2]{PI/2, 0};
+__host__ __device__ __constant__ float rot_L[2]{-PI/2, 0};
 
-__constant__ float rot_U[2]{0, PI/2};
-__constant__ float rot_D[2]{0, -PI/2};
+__host__ __device__ __constant__ float rot_U[2]{0, PI/2};
+__host__ __device__ __constant__ float rot_D[2]{0, -PI/2};
 
 // __constant__ float 
 
@@ -136,6 +211,9 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
     
     float angle_phi = interval_mod(phi + __offset_phi, -PI, PI);
     float angle_th = interval_mod(th + __offset_th, 0, PI);
+
+    int i=0, j=0;
+    uint8_t* __img__;
 
     if(__is_cube){
         // TODO: needs some algebra and rays inside a cube
@@ -175,7 +253,6 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
         float transformed_phi = angle_phi;
         float transformed_th = angle_th;
         bool back_face = false;
-        uint8_t* __img__;
         if(fabs(xr/zr)<1 & fabs(yr/zr)<1){
             // we are in UP or DOWN face
 
@@ -199,7 +276,7 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
         } else if(fabs(angle_phi+PI/2) < PI/4) { // LEFT
             transformed_phi = angle_phi + rot_R[0];
             transformed_th = angle_th + rot_R[1];
-            __img__ = __img_left
+            __img__ = __img_left;
         } else { // BACK
             transformed_phi = angle_phi + rot_B[0];
             transformed_th = angle_th + rot_B[1];
@@ -218,24 +295,174 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
 
         // (1-2*back_face) flips the sign when back_face is true
         // this, with -__width*back_face in both indexes is intended to rotate the image 180 degrees
-        int i = (1-2*back_face)*(-__width * back_face + (int) round( (tr_y+1)/2)*__width);
-        int j = (1-2*back_face)*(-__height * back_face + (int) round( (tr_z+1)/2)*__height);
+        i = (1-2*back_face)*(-__width * back_face + (int) round( (tr_y+1)/2)*__width);
+        j = (1-2*back_face)*(-__height * back_face + (int) round( (tr_z+1)/2)*__height);
         // ASSUMPTION: all faces of the cube have the same __width, __height and __channels
-        for(int k=0; k<__channels; ++k){
-            pixel[k] = __img__[IMG_INDEX(i,j,k, __width, __height, __channels)];
-        }
 
-    } else {
+
+    } else { // if is not cube
         __img__ = __img;
-        int i = (int)round( interval_mod(angle_phi, 0, 2*PI)* width/(2*PI)) ;
-        int j = (int)round(interval_mod(angle_th, 0, PI) * height/PI);
-
-        for(int k=0; k<__channels; k++){
-            pixel[k] = __img[IMG_INDEX(i, j, k, __width, __height, __channels)];
-        }
+        i = (int)round( interval_mod(angle_phi, 0, 2*PI)* width/(2*PI)) ;
+        j = (int)round(interval_mod(angle_th, 0, PI) * height/PI);   
     }
 
+    for(int k=0; k<__channels; k++){
+        pixel[k] = __img__[IMG_INDEX(i, j, k, __width, __height, __channels)];
+    }
 
 }
 
+
+void Skybox::get_pixel_cuda(float* phi, float *th, int n_points, uint8_t*pixel){
+
+
+    dim3 blocks = BLOCKS(n_points);
+    dim3 threads = THREADS(n_points);
+
+
+    float* _d_phi, *_d_th, _d_pixel;
+    cudaMalloc( (void**) &_d_phi, sizeof(float) * n_points);
+    cudaMalloc( (void**) &_d_th, sizeof(float) * n_points);
+    cudaMalloc( (void**) &_d_th, sizeof(float) * n_points*__channels);
+
+    cudaMemcpy( _d_phi, phi, sizeof(float)* n_points, cudaMemcpyHostToDevice);
+    cudaMemcpy( _d_th, th, sizeof(float)* n_points, cudaMemcpyHostToDevice);
+
+    gpuErrchk(cudaGetLastError(), true);
+
+
+    extract_pixel_cuda<<<blocks, threads>>>(__d_img, __img_u, __img_d, __img_f, __img_b, __img_l, __img_r,
+            __width, __height, __channels, _d_phi, _d_th, n_points, _d_pixel, __offset_phi, __offset_th);
+    gpuErrchk(cudaGetLastError(), true);
+
+    cudaDeviceSynchronize();
+    
+    cudaMemcpy(pixel, _d_pixel, sizeof(float)*n_points*__channels, cudaMemcpyDeviceToHost);
+
+    cudaFree(_d_phi);
+    cudaFree(_d_th);
+    cudaFree(_d_pixel);
+}
+
+
+__global__ void extract_pixel_cuda(uint8_t* __img, // single image
+    uint8_t* _img_u, // cube up
+    uint8_t* _img_d, // cube down
+    uint8_t* _img_f, // cube front
+    uint8_t* _img_b, // cube back
+    uint8_t* _img_l, // cube left
+    uint8_t* _img_r, // cube right
+    int __width, int __height, int __channels,
+    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th, float __offset_th){
+    
+    int index_x = blockIdx.x*blockDim.x+threadIdx.x;
+    
+
+    // almost copy paste from Skybox::get_pixel
+    float angle_phi = interval_mod(phi[index_x], + __offset_phi, -PI, PI);
+    float angle_th = interval_mod(th[index_x] + __offset_th, 0, PI);
+
+    int i=0, j=0;
+    uint8_t* __img__;
+
+    if(__is_cube){
+        // TODO: needs some algebra and rays inside a cube
+        // referential at center of cube
+        // x points FRONT
+        // y points LEFT
+        // z points UP
+
+
+        // x = r cos phi sin th
+        // y = r sin phi sin th
+        // z = r cos th
+
+        // faces: F, B, R, L, U, D
+        // front, back, left, right, up, down
+        // F: x = 1, y,z<1
+        // B: x=-1, y,z<1
+        // R (L): y=(-)1, x,z<1 
+        // U (D): z=(-)1, z,y<1
+
+        // xr = x/r, yr = y/r, zr = z/r
+        float xr = cos(angle_phi) * sin(angle_th);
+        float yr = sin(angle_phi) * sin(angle_th);
+        float zr = cos(angle_th);
+
+        // figure out if ray pointing to up face
+        // assume z = +-1 -> r = +-1/(zr)
+        // x = xr*r = +- xr/zr
+        // y = yr * r = +- yr/zr 
+        
+        // if |xr/zr| < 1 and |yr/zr| < 1 
+        // then we are in up or down face
+        // up face : 0<th<PI/2
+        // down face: PI/2<th<0
+
+        // otherwise
+        float transformed_phi = angle_phi;
+        float transformed_th = angle_th;
+        bool back_face = false;
+        if(fabs(xr/zr)<1 & fabs(yr/zr)<1){
+            // we are in UP or DOWN face
+
+            if(angle_th<PI/2){ // UP
+                transformed_phi = angle_phi + rot_U[0];
+                transformed_th = angle_th + rot_U[1];
+                __img__ = __img_u;
+            } else { // DOWN
+                transformed_phi = angle_phi + rot_D[0];
+                transformed_th = angle_th + rot_D[1];
+                __img__ = __img_d;
+            }
+        } else if(fabs(angle_phi) < PI/4) { // FRONT
+            transformed_phi = angle_phi + rot_F[0];
+            transformed_th = angle_th + rot_F[1];
+            __img__ = __img_f;
+        } else if(fabs(angle_phi-PI/2) < PI/4){ // RIGHT
+            transformed_phi = angle_phi + rot_R[0];
+            transformed_th = angle_th + rot_R[1];
+            __img__ = __img_r;
+        } else if(fabs(angle_phi+PI/2) < PI/4) { // LEFT
+            transformed_phi = angle_phi + rot_R[0];
+            transformed_th = angle_th + rot_R[1];
+            __img__ = __img_l;
+        } else { // BACK
+            transformed_phi = angle_phi + rot_B[0];
+            transformed_th = angle_th + rot_B[1];
+            back_face = true;
+            __img__ = __img_b;
+        }
+        // y = r sin phi sin th
+        // z = r cos th
+        // cube within -1,1 in all axis
+        // face projection onto y-z plane
+        float tr_y = sin(transformed_phi) * sin(transformed_th);
+        float tr_z = cos(transformed_th);
+
+        // (tr_y + 1)/2 is between 0 and 1
+        // multiplied by __width gives the pixel position
+
+        // (1-2*back_face) flips the sign when back_face is true
+        // this, with -__width*back_face in both indexes is intended to rotate the image 180 degrees
+        i = (1-2*back_face)*(-__width * back_face + (int) round( (tr_y+1)/2)*__width);
+        j = (1-2*back_face)*(-__height * back_face + (int) round( (tr_z+1)/2)*__height);
+        // ASSUMPTION: all faces of the cube have the same __width, __height and __channels
+
+
+    } else { // if is not cube
+        __img__ = __img;
+        i = (int)round( interval_mod(angle_phi, 0, 2*PI)* width/(2*PI)) ;
+        j = (int)round(interval_mod(angle_th, 0, PI) * height/PI);   
+    }
+
+    for(int k=0; k<__channels; k++){
+        pixel[index_x*__channels +k] = __img__[IMG_INDEX(i, j, k, __width, __height, __channels)];
+    }
+
+
+
+
+
+}
 

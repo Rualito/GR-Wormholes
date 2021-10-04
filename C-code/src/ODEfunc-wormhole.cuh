@@ -24,7 +24,7 @@ bool __cuda_ode_func__(int n_params, float *params, int n_coords, float* coords,
     
     // coords: 
     // [0] : t - time
-    // [1] : l - distance thrugh wormhole
+    // [1] : l - distance through wormhole
     // [2] : th - theta, altitude angle
     // [3] : phi - azimuth angle
     // [4] : pl - radial direction of light momentum

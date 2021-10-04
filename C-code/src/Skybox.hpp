@@ -36,6 +36,8 @@ class Skybox {
         // loads the image file into a pointer
         // if cuda_speedup is true, the image is loaded into the GPU to paralelise pixel retrieval
         Skybox(const char* filename, bool is_cube=false, float offset_phi=0, float offset_th=0, bool cuda_speedup=false);
+        Skybox(const Skybox &skybox);
+
         ~Skybox();
         void get_pixel(float phi, float th, uint8_t* pixel);
 
@@ -45,6 +47,7 @@ class Skybox {
     private: 
 
         void initialize_image(const char* filename, uint8_t* img);
+        void copy_image(uint8_t *_img_, uint8_t* _img_origin);
         float __offset_phi;
         float __offset_th;
 
@@ -72,8 +75,6 @@ class Skybox {
 };
 
 // places x inside interval [x0, x1[  
-float interval_mod(float x, float x0, float x1){
-    return fmod(x-x0, x1) + x0;
-}
+
 
 #endif

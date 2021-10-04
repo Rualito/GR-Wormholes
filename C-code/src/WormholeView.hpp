@@ -17,37 +17,50 @@
 
 #include "Skybox.hpp"
 
-#define THREADS_PER_BLOCK 16 // 1 dimensional thread blocks
-#define THREADS(N) dim3((THREADS_PER_BLOCK<N?THREADS_PER_BLOCK:N),1,1);
-#define BLOCKS(N) dim3((N>THREADS_PER_BLOCK?N/THREADS_PER_BLOCK:1),1,1);
-
-
 
 class WormholeView {
     public:    
         // sky1, sky2 are the universe at both sides of the wormhole
-        WormholeView(Skybox sky1, Skybox sky2, int view_width=640, int view_height=480);
+        // define image view resolution 
+        WormholeView(Skybox &sky1, Skybox &sky2,  float fov=PI/2,
+            int view_width=640, int view_height=480);
+        ~WormholeView();
 
-        void set_resolution(int view_width, int view_height);
-        void set_deflection(float *photon_param, float *end_coords);
+        void set_view(int view_width, int view_height);
+        void set_fov(float fov);
+        void set_resolution_scale(float resolution_scale);
+        // void set_deflection(float *photon_param, float *end_coords, int n_points);
+        // photon_param: list of starting photon position and direction
+        // end_coords:
 
+        void compute_deflection(float l0, float M, float rho, float a, float max_l);
+
+
+
+        // return true if sucessfull
         bool get_texture_array(uint8_t* texture_array);
         bool write_image_jpg(const char* filename);
 
-        ~WormholeView();
+
     protected:
-        int width1;
-        int height1;
-        int channels1;
+        Skybox _sky1;
+        Skybox _sky2;
+        int _view_width, _view_height;
+        
 
-        int width2;
-        int height2;
-        int channels2;
+        bool is_deflection_computed=false;
+        float _fov;
 
-        bool is_deflection_set=false;
-
-        float* all_coords;
+        // _int: coordinates retrieved from RK integration
+        // _photon_theta_start is assumed from linear split of interval [0,PI[ into n_points
+        int _int_n_points=0;
+        float *_int_sign_l_end;
+        float *_int_photon_theta_end;
+        // float* all_coords;
     private:
+        int n_points; 
+        float _resolution_scale=2;
+
 
 };
 
