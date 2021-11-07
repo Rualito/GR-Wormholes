@@ -14,6 +14,7 @@
 
 
 #include <stdio.h>
+#include "cuErrorChecking.cuh"
 
 // #include <sys/types.h>
 // #include <sys/stat.h>
@@ -42,20 +43,23 @@ class Skybox {
         void get_pixel(float phi, float th, uint8_t* pixel);
 
         // phi and th are arrays of n_points,  
-        void get_pixel_cuda(float* phi, float* th, int n_points, uint8_t* pixel);
+        void get_pixel_CUDA(float* phi, float* th, int n_points, uint8_t* pixel);
+
+        // TODO : 
+        void set_offset_angles(float offset_phi=0, float offset_th=0);
+    
+    protected:
+        int __width, __height, __channels;
 
     private: 
-
-        void initialize_image(const char* filename, uint8_t* img);
-        void copy_image(uint8_t *_img_, uint8_t* _img_origin);
+        void initialize_image(const char* filename, uint8_t* img, uint8_t* d_img);
+        void copy_image(uint8_t *_img_, uint8_t* _img_origin, uint8_t* _d_img_);
         float __offset_phi;
         float __offset_th;
 
         bool __is_cube;
         bool __cuda_speedup;
         
-        int __width, __height, __channels;
-
         uint8_t* __img;
         uint8_t* __d_img;
         
@@ -76,5 +80,15 @@ class Skybox {
 
 // places x inside interval [x0, x1[  
 
+
+__global__ void extract_pixel_cuda(uint8_t* __img, // single image
+    uint8_t* _img_u, // cube up
+    uint8_t* _img_d, // cube down
+    uint8_t* _img_f, // cube front
+    uint8_t* _img_b, // cube back
+    uint8_t* _img_l, // cube left
+    uint8_t* _img_r, // cube right
+    int __width, int __height, int __channels,
+    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th);
 
 #endif

@@ -3,7 +3,7 @@ CC:= g++
 NVCC:= /opt/cuda/bin/nvcc
 
 VPATH = src/:lib/ 
-CFLAGS:= -O2 -m64 -std=c++11 -g
+CFLAGS:= -O3 -m64 -std=c++11 -g -use_fast_math
 
 CUDA_PATH ?= /opt/cuda
 CUDA_PATH := -I$(CUDA_PATH)

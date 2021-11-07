@@ -1,10 +1,10 @@
 
-#include "Skybox.hpp"
+#include "Skybox.cuh"
 
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-
+#include <string>
 
 // a fudge parameter because I am lazy
 #ifndef SKYCUBE_FILETYPE
@@ -41,13 +41,15 @@ Skybox::Skybox(const char* filename, bool is_cube, float offset_phi, float offse
         // __img_back = stbi_load((String(filename) + "/back" + SKYCUBE_FILETYPE), &__width, &__height, &__channels, 0);
         // __img_left = stbi_load((String(filename) + "/left" + SKYCUBE_FILETYPE), &__width, &__height, &__channels, 0);
         // __img_right = stbi_load((String(filename) + "/right" + SKYCUBE_FILETYPE), &__width, &__height, &__channels, 0);
+        
+        std::string file(filename);
 
-        this->initialize_image((String(filename) + "/top" + SKYCUBE_FILETYPE), __img_up, __d_img_up);
-        this->initialize_image((String(filename) + "/bottom" + SKYCUBE_FILETYPE), __img_down, __d_img_down);
-        this->initialize_image((String(filename) + "/front" + SKYCUBE_FILETYPE), __img_front, __d_img_front);
-        this->initialize_image((String(filename) + "/back" + SKYCUBE_FILETYPE), __img_back, __d_img_back);
-        this->initialize_image((String(filename) + "/left" + SKYCUBE_FILETYPE), __img_left, __d_img_left);
-        this->initialize_image((String(filename) + "/right" + SKYCUBE_FILETYPE), __img_right, __d_img_right);
+        this->initialize_image((file + "/top" + SKYCUBE_FILETYPE).c_str(), __img_up, __d_img_up);
+        this->initialize_image((file+ "/bottom" + SKYCUBE_FILETYPE).c_str(), __img_down, __d_img_down);
+        this->initialize_image((file + "/front" + SKYCUBE_FILETYPE).c_str(), __img_front, __d_img_front);
+        this->initialize_image((file + "/back" + SKYCUBE_FILETYPE).c_str(), __img_back, __d_img_back);
+        this->initialize_image((file + "/left" + SKYCUBE_FILETYPE).c_str(), __img_left, __d_img_left);
+        this->initialize_image((file + "/right" + SKYCUBE_FILETYPE).c_str(), __img_right, __d_img_right);
 
         // if(__img_up == NULL 
         //     || __img_down == NULL 
@@ -143,7 +145,7 @@ void Skybox::copy_image(uint8_t* _img_, uint8_t* _img_origin, uint8_t* _d_img_){
 
     if(__cuda_speedup){
         cudaMalloc( (void**) &_d_img_, __width*__height*__channels*sizeof(uint8_t));
-        cudaMemcpy(_d_img, _img_, __width*__height*__channels*sizeof(uint8_t), cudaMemcpyHostToDevice);
+        cudaMemcpy(_d_img_, _img_, __width*__height*__channels*sizeof(uint8_t), cudaMemcpyHostToDevice);
     }
 }
 
@@ -302,8 +304,8 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
 
     } else { // if is not cube
         __img__ = __img;
-        i = (int)round( interval_mod(angle_phi, 0, 2*PI)* width/(2*PI)) ;
-        j = (int)round(interval_mod(angle_th, 0, PI) * height/PI);   
+        i = (int)round( interval_mod(angle_phi, 0, 2*PI)* __width/(2*PI)) ;
+        j = (int)round(interval_mod(angle_th, 0, PI) * __height/PI);   
     }
 
     for(int k=0; k<__channels; k++){
@@ -313,7 +315,7 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
 }
 
 
-void Skybox::get_pixel_cuda(float* phi, float *th, int n_points, uint8_t*pixel){
+void Skybox::get_pixel_CUDA(float* phi, float *th, int n_points, uint8_t*pixel){
 
 
     dim3 blocks = BLOCKS(n_points);
@@ -331,7 +333,7 @@ void Skybox::get_pixel_cuda(float* phi, float *th, int n_points, uint8_t*pixel){
     gpuErrchk(cudaGetLastError(), true);
 
 
-    extract_pixel_cuda<<<blocks, threads>>>(__d_img, __img_u, __img_d, __img_f, __img_b, __img_l, __img_r,
+    extract_pixel_cuda<<<blocks, threads>>>(__d_img, __img_up, __img_down, __img_front, __img_back, __img_left, __img_right,
             __width, __height, __channels, _d_phi, _d_th, n_points, _d_pixel, __offset_phi, __offset_th);
     gpuErrchk(cudaGetLastError(), true);
 
@@ -353,7 +355,7 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
     uint8_t* _img_l, // cube left
     uint8_t* _img_r, // cube right
     int __width, int __height, int __channels,
-    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th, float __offset_th){
+    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th){
     
     int index_x = blockIdx.x*blockDim.x+threadIdx.x;
     
@@ -409,29 +411,29 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
             if(angle_th<PI/2){ // UP
                 transformed_phi = angle_phi + rot_U[0];
                 transformed_th = angle_th + rot_U[1];
-                __img__ = __img_u;
+                __img__ = _img_u;
             } else { // DOWN
                 transformed_phi = angle_phi + rot_D[0];
                 transformed_th = angle_th + rot_D[1];
-                __img__ = __img_d;
+                __img__ = _img_d;
             }
         } else if(fabs(angle_phi) < PI/4) { // FRONT
             transformed_phi = angle_phi + rot_F[0];
             transformed_th = angle_th + rot_F[1];
-            __img__ = __img_f;
+            __img__ = _img_f;
         } else if(fabs(angle_phi-PI/2) < PI/4){ // RIGHT
             transformed_phi = angle_phi + rot_R[0];
             transformed_th = angle_th + rot_R[1];
-            __img__ = __img_r;
+            __img__ = _img_r;
         } else if(fabs(angle_phi+PI/2) < PI/4) { // LEFT
             transformed_phi = angle_phi + rot_R[0];
             transformed_th = angle_th + rot_R[1];
-            __img__ = __img_l;
+            __img__ = _img_l;
         } else { // BACK
             transformed_phi = angle_phi + rot_B[0];
             transformed_th = angle_th + rot_B[1];
             back_face = true;
-            __img__ = __img_b;
+            __img__ = _img_b;
         }
         // y = r sin phi sin th
         // z = r cos th
@@ -452,8 +454,8 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
 
     } else { // if is not cube
         __img__ = __img;
-        i = (int)round( interval_mod(angle_phi, 0, 2*PI)* width/(2*PI)) ;
-        j = (int)round(interval_mod(angle_th, 0, PI) * height/PI);   
+        i = (int)round(interval_mod(angle_phi, 0, 2*PI)* __width/(2*PI)) ;
+        j = (int)round(interval_mod(angle_th, 0, PI) * __height/PI);   
     }
 
     for(int k=0; k<__channels; k++){

@@ -15,7 +15,7 @@
 
 #include "cuErrorChecking.cuh"
 
-#include "Skybox.hpp"
+#include "Skybox.cuh"
 
 
 class WormholeView {
@@ -36,9 +36,12 @@ class WormholeView {
         void compute_deflection(float l0, float M, float rho, float a, float max_l);
 
 
-
         // return true if sucessfull
-        bool get_texture_array(uint8_t* texture_array);
+        // texture_array has alocated view_width*view_height*channels
+        // Default look: wormhole right in front - z axis is always vertical 
+        bool get_texture_array(uint8_t* texture_array, float look_th, float look_phi);
+        bool get_texture_array_CUDA(uint8_t* texture_array, float look_th, float look_phi);
+        
         bool write_image_jpg(const char* filename);
 
 
@@ -54,7 +57,7 @@ class WormholeView {
         // _int: coordinates retrieved from RK integration
         // _photon_theta_start is assumed from linear split of interval [0,PI[ into n_points
         int _int_n_points=0;
-        float *_int_sign_l_end;
+        int8_t *_int_sign_l_end;
         float *_int_photon_theta_end;
         // float* all_coords;
     private:

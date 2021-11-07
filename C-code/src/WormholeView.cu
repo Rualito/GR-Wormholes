@@ -2,7 +2,7 @@
 
 
 
-#include "WormholeView.hpp"
+#include "WormholeView.cuh"
 
 // #define BENCHMARK
 #include "BenchMark.hpp"
@@ -11,6 +11,16 @@
 #define THREADS(N) dim3((THREADS_PER_BLOCK<N?THREADS_PER_BLOCK:N),1,1);
 #define BLOCKS(N) dim3((N>THREADS_PER_BLOCK?N/THREADS_PER_BLOCK:1),1,1);
 
+#define MAX_ITER 2048 // how many iterations until the simulation stops
+
+// channels should always be 4
+#define TEXTURE_INDEX(i,j,k, width, height, channels) ((j)*(width)*(channels)+(i)*(channels)+(k))
+
+
+__host__ __device__ 
+float interval_mod(float x, float x0, float x1){
+    return fmod(x-x0, x1) + x0;
+}
 
 
 WormholeView::WormholeView(Skybox &sky1, Skybox &sky2,float fov ,int view_width=640, int view_height=480, float _resolution_scale=2): _sky1(sky1), _sky2(sky2),_fov(fov), _view_width(view_width), _view_height(view_height), _resolution_scale(resolution_scale){
@@ -52,13 +62,14 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
 // phi_p is associated angle with observer x
 
     int prev_n = _int_n_points;
-    _int_n_points = (int)(PI/_fov * _view_width * resolution_scale);
+    _int_n_points = (int)(PI/_fov * _view_width * _resolution_scale);
+    int n_points = _int_n_points;
 
     if(_int_n_points != prev_n){
         if(_int_sign_l_end) free(_int_sign_l_end);
         if(_int_photon_theta_end) free(_int_photon_theta_end);
     }
-
+    // allocate memory for the simulation data arrays
     _int_sign_l_end = (float*) malloc(_int_n_points*sizeof(float));
     _int_photon_theta_end = (float*) malloc(_int_n_points*sizeof(float));
 
@@ -161,31 +172,19 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
     cudaMemcpy(flag, d_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
     BENCHMARK_END(1);
 
+    // Theta_in : (PI*i)/n_points
+    // Theta_out : integration_results[n_coords*MAX_ITER*i + j*n_coords + k] ; theta: k=2 ; j=integration_end[i]-1
+    // s_l : sign(" in results "); l : k=1; j = integration_end[i] -1
+
     // PARSE RESULTS INTO _int_sign_l_end AND _int_photon_theta_end
-    // USE SOMETHING FROM THIS :
     
-    // for(int i=0; i<n_points; ++i){ // for each requested point
-    //     outdata << "New point coordinate " << i << "; params:\t";
-    //     for(int j=0; j<n_params; ++j){
-    //         float param_now = params_array[i*n_params+j];
-    //         outdata << param_now << "\t";
-    //     }
-    //     outdata << "\n";
-    //     for(int k=0; k<n_coords; ++k){
-    //         float coord_now = coord_array[i*n_coords+k];
-    //         outdata << coord_now << "\t";
-    //     } 
-    //     outdata <<  "\n";
-    //     //printf("integration end: %d\n", integration_end[i]);
-    //     for(int j=0; j<integration_end[i]; ++j){ // throughout the simulation results
-    //         for(int k=0; k<n_coords; ++k){
-    //             outdata << integration_results[n_coords*MAX_ITER*i + j*n_coords+k] << "\t";
-    //             // 3 coordinates
-    //         }
-    //         outdata << "\n";
-    //     }
-    //     outdata << "\n";
-    // }
+    for(int i=0; i<n_points; ++i){
+        int k_th = 2;
+        int k_l = 1;
+        int j = integration_end[i]-1;
+        _int_sign_l_end[i] = sign(integration_results[n_coords*MAX_ITER*i + j*n_coords + k_l]);
+        _int_photon_theta_end[i] = integration_results[n_coords*MAX_ITER*i + j*n_coords + k_th];
+    }
 
     cudaFree(d_coord_array);
     cudaFree(d_params_array);
@@ -203,4 +202,89 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
     delete[] max_coords;
 
     is_deflection_computed = true;
+}
+
+
+bool WormholeView::get_texture_array(uint8_t* texture, float look_th=PI/2, float look_phi=0) {
+    // texture_array has alocated view_width*view_height*channels
+    // Default look: wormhole right in front - z axis is always vertical 
+    // Need to first convert look angles into deflection angles
+    // deflection angles denominated by _tilde: th_tilde, phi_tilde.
+    if(!is_deflection_computed){ 
+        printf("Deflection angles not computed yet!\n");
+        return false;
+    }
+
+    float Dphi = fov;
+    float L = _view_width/(2*tan(Dphi/2)); 
+
+    // do this for each pixel on the screen
+    for(int x = 0; x<_view_width; ++x){ // phi in look frame
+        for(int y = 0; y<_view_height; ++y){  // th in look frame
+            float xp = x-_view_width/2.0f;
+            float yp = y-_view_height/2.0f;
+
+            float dphi = atan2(xp,L);
+            float dth = atan2(yp,L);
+
+            float ray_th = look_th + dth;
+            float ray_phi = look_phi + dphi;
+
+            // converting angles to 'deflection' frame of reference
+            float th_tilde = acos( cos(ray_phi)*sin(ray_th));
+            float phi_tilde = interval_mod(atan2(cos(ray_th, sin(ray_phi)*sin(ray_th))), 0, 2*PI);
+            
+            // spherical symmetry
+            float phi_tilde_prime = phi_tilde;
+
+            int i0 = floor(th_tilde * n_points/PI);
+            int i1 = ceil(th_tilde * n_points/PI);
+
+            float dth = PI/n_points;
+            
+            float pi0 = (th_tilde - (i0*PI/n_points)) / dth;
+            float pi1 = 1-pi0;
+
+            // such that th_tilde = pi0*(i0*PI/n_points) + pi1*(i1*PI/n_points);
+
+            // linear interpolation of previously computed deflection angles
+            // in _tilde coordinates
+            float th_tilde_prime = pi0*_int_photon_theta_end[i0] + pi1 * _int_photon_theta_end[i1];
+            float sl = pi0*_int_sign_l_end[i0] + pi1 * _int_sign_l_end[i1];
+
+
+            // Convert the angles back to the 'look' reference frame
+            float th_prime = acos(sin(th_tilde_prime)*sin(phi_tilde_prime));
+            float phi_prime = interval_mod(atan2(sin(th_tilde_prime)*cos(phi_tilde_prime)),cos(th_tilde_prime)), 0, 2*PI);
+
+            // pixel of the current look angle
+            // uint8_t pixel[_sky1.channels];
+            uint8_t pixel1[_sky1.__channels];
+            uint8_t pixel2[_sky2.__channels];
+            
+            sky1.get_pixel(phi_prime,th_prime,pixel1);
+            sky2.get_pixel(phi_prime,th_prime,pixel2);
+
+            for(int k=0; k<sky1.__channels;++k){
+                // weighted pixel between horizon, if its on a switch zone
+                // pixel[k] = pixel1[k] * (sl+1)*0.5 + (1-(sl+1)*0.5) * pixel2[k];
+                texture[TEXTURE_INDEX(x, y, k, _view_width, _view_height, sky1.__channels)] = pixel1[k] * (sl+1)*0.5 + (1-(sl+1)*0.5) * pixel2[k]; 
+            }
+        }
+    }
+
+    return true;
+}
+
+
+bool WormholeView::get_texture_array_CUDA(uint8_t* texture, float look_th, float look_phi) {
+    if(!is_deflection_computed){ 
+        printf("Deflection angles not computed yet!\n");
+        return false;
+    }
+
+    // do _view_width threads loading the pixels for the image 
+
+
+    return true;
 }
