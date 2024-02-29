@@ -4,11 +4,6 @@
 #ifndef __wormhole_view_h__
 #define __wormhole_view_h__
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
 
 #include "math.h"
 #define PI 3.1415926535897932384626433832795028841971693993751058209749445923078
@@ -17,13 +12,19 @@
 
 #include "Skybox.cuh"
 
+#include "ODEfunc-wormhole.cuh" 
+#include "RK-kernels.cuh"
+
+#include "math.h"
+#include "tgmath.h"
+
+
 
 class WormholeView {
     public:    
         // sky1, sky2 are the universe at both sides of the wormhole
         // define image view resolution 
-        WormholeView(Skybox &sky1, Skybox &sky2,  float fov=PI/2,
-            int view_width=640, int view_height=480);
+        WormholeView(Skybox &sky1, Skybox &sky2,  float fov=PI/2,int view_width=640, int view_height=480, float resolution_scale=2);
         ~WormholeView();
 
         void set_view(int view_width, int view_height);

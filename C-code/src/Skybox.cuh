@@ -1,19 +1,11 @@
-
-
-
-
 #ifndef __sky_box_h__
 #define __sky_box_h__
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 
 #include "math.h"
 #define PI 3.1415926535897932384626433832795028841971693993751058209749445923078
 
-
 #include <stdio.h>
+#include <stdint.h>
 #include "cuErrorChecking.cuh"
 
 // #include <sys/types.h>
@@ -40,15 +32,15 @@ class Skybox {
         Skybox(const Skybox &skybox);
 
         ~Skybox();
+        
         void get_pixel(float phi, float th, uint8_t* pixel);
-
         // phi and th are arrays of n_points,  
         void get_pixel_CUDA(float* phi, float* th, int n_points, uint8_t* pixel);
 
         // TODO : 
         void set_offset_angles(float offset_phi=0, float offset_th=0);
     
-    protected:
+    // protected:
         int __width, __height, __channels;
 
     private: 
@@ -89,6 +81,6 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
     uint8_t* _img_l, // cube left
     uint8_t* _img_r, // cube right
     int __width, int __height, int __channels,
-    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th);
+    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th, bool __is_cube);
 
 #endif

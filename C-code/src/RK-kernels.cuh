@@ -73,8 +73,7 @@ __constant__ float c_factor[6]{1./5, 3./10, 4./5, 8./9, 1., 1.};
 // flag changed to 1 if ODE function error 
 
 __device__
-void run_DOPRI5_until(int n_params, float* params, int n_coords, float *coords0,
-int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, float rtol,uint8_t* flag){
+void run_DOPRI5_until(int n_params, float* params, int n_coords, float *coords0, int MAX_ITER, float* max_coords, int* conv_iter_n, float* coords_iterations, float step_size, float rtol,uint8_t* flag){
     // const int index_x = blockIdx.x*blockDim.x+threadIdx.x;
 
     (*conv_iter_n) = 0;

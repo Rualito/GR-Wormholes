@@ -3,16 +3,18 @@
 
 #include <SFML/Graphics.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+// #define STB_IMAGE_IMPLEMENTATION
+// #include "stb_image.h"
 
 #include "math.h"
 #define PI 3.1415926535897932384626433832795028841971693993751058209749445923078
 
 #include "limits.h"
+
+// TODO: 
+// Define Image class (to avoid stb_image.h multiple definition errors)
+// example: https://stackoverflow.com/questions/43348798/double-inclusion-and-headers-only-library-stbi-image#54367765
+
 
 #include <iostream>
 #include <fstream>
@@ -35,11 +37,6 @@
 #include "Debug.hpp"
 
 #include "cuErrorChecking.cuh"
-
-// defines the ode functions to use
-#include "ODEfunc-wormhole.cuh" 
-
-#include "RK-kernels.cuh"
 
 #include "Skybox.cuh"
 #include "WormholeView.cuh"

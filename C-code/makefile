@@ -61,7 +61,7 @@ cuobj: $(CUDA_OBJ)
 
 bin/%.x : bin/%.o $(OBJS)
 	@echo "Making executable $< [$@]"
-	@-$(NVCC)  $(CUDAFLAGS) -o $@ $^ $(INCLUDE) -I$(CUDA_PATH) $(CUDA_LIB) $(SFMLLIB) 
+	-$(NVCC)  $(CUDAFLAGS) -o $@ $^ $(INCLUDE) -I$(CUDA_PATH) $(CUDA_LIB) $(SFMLLIB) 
 	@echo 
 #@echo "Running executable"
 #$@

@@ -1,11 +1,8 @@
-
-
-
-
 #include "WormholeView.cuh"
 
 // #define BENCHMARK
 #include "BenchMark.hpp"
+
 
 #define THREADS_PER_BLOCK 16 // 1 dimensional thread blocks
 #define THREADS(N) dim3((THREADS_PER_BLOCK<N?THREADS_PER_BLOCK:N),1,1);
@@ -16,6 +13,7 @@
 // channels should always be 4
 #define TEXTURE_INDEX(i,j,k, width, height, channels) ((j)*(width)*(channels)+(i)*(channels)+(k))
 
+#define SIGN(x) ( (x) > 0) - ( (x) < 0) 
 
 __host__ __device__ 
 float interval_mod(float x, float x0, float x1){
@@ -23,14 +21,14 @@ float interval_mod(float x, float x0, float x1){
 }
 
 
-WormholeView::WormholeView(Skybox &sky1, Skybox &sky2,float fov ,int view_width=640, int view_height=480, float _resolution_scale=2): _sky1(sky1), _sky2(sky2),_fov(fov), _view_width(view_width), _view_height(view_height), _resolution_scale(resolution_scale){
+WormholeView::WormholeView(Skybox &sky1, Skybox &sky2,float fov ,int view_width, int view_height, float resolution_scale): _sky1(sky1), _sky2(sky2),_fov(fov), _view_width(view_width), _view_height(view_height), _resolution_scale(resolution_scale){
     // n_points = PI/fov * view_width * _resolution_scale;
     is_deflection_computed = false;
 }
 
 
 WormholeView::~WormholeView(){
-    if(_int_sign_l) free(_int_sign_l);
+    if(_int_sign_l_end) free(_int_sign_l_end);
     if(_int_photon_theta_end) free(_int_photon_theta_end);
 
 }
@@ -45,7 +43,7 @@ void WormholeView::set_fov(float fov){
     
 }
 
-void WormholeView::set_resolution_scale(float resolution_scale){}int view_width, int view_height){
+void WormholeView::set_resolution_scale(float resolution_scale){
     _resolution_scale = resolution_scale;
 }
 
@@ -70,7 +68,7 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
         if(_int_photon_theta_end) free(_int_photon_theta_end);
     }
     // allocate memory for the simulation data arrays
-    _int_sign_l_end = (float*) malloc(_int_n_points*sizeof(float));
+    _int_sign_l_end = (int8_t*) malloc(_int_n_points*sizeof(int8_t));
     _int_photon_theta_end = (float*) malloc(_int_n_points*sizeof(float));
 
     const int n_coords = 6; 
@@ -90,7 +88,7 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
 
         float pl0 = p*cos(th_p); // = observer p_z
         float pphi0 = p*sin(th_p)*sin(phi_p); // = observer p_y
-        float pth0 = p*sin(th_p)*cos(phi_p) // = observer p_x
+        float pth0 = p*sin(th_p)*cos(phi_p); // = observer p_x
 
         float sth = sin(th0);
         float B = sqrt(pth0*pth0 + pphi0*pphi0/(sth*sth));
@@ -182,7 +180,7 @@ void WormholeView::compute_deflection(float l0, float M, float rho, float a, flo
         int k_th = 2;
         int k_l = 1;
         int j = integration_end[i]-1;
-        _int_sign_l_end[i] = sign(integration_results[n_coords*MAX_ITER*i + j*n_coords + k_l]);
+        _int_sign_l_end[i] = SIGN(integration_results[n_coords*MAX_ITER*i + j*n_coords + k_l]);
         _int_photon_theta_end[i] = integration_results[n_coords*MAX_ITER*i + j*n_coords + k_th];
     }
 
@@ -215,7 +213,7 @@ bool WormholeView::get_texture_array(uint8_t* texture, float look_th=PI/2, float
         return false;
     }
 
-    float Dphi = fov;
+    float Dphi = _fov;
     float L = _view_width/(2*tan(Dphi/2)); 
 
     // do this for each pixel on the screen
@@ -232,7 +230,7 @@ bool WormholeView::get_texture_array(uint8_t* texture, float look_th=PI/2, float
 
             // converting angles to 'deflection' frame of reference
             float th_tilde = acos( cos(ray_phi)*sin(ray_th));
-            float phi_tilde = interval_mod(atan2(cos(ray_th, sin(ray_phi)*sin(ray_th))), 0, 2*PI);
+            float phi_tilde = interval_mod(atan2(cos(ray_th), sin(ray_phi)*sin(ray_th)), 0, 2*PI);
             
             // spherical symmetry
             float phi_tilde_prime = phi_tilde;
@@ -240,9 +238,9 @@ bool WormholeView::get_texture_array(uint8_t* texture, float look_th=PI/2, float
             int i0 = floor(th_tilde * n_points/PI);
             int i1 = ceil(th_tilde * n_points/PI);
 
-            float dth = PI/n_points;
+            float d_th = PI/n_points;
             
-            float pi0 = (th_tilde - (i0*PI/n_points)) / dth;
+            float pi0 = (th_tilde - (i0*PI/n_points)) / d_th;
             float pi1 = 1-pi0;
 
             // such that th_tilde = pi0*(i0*PI/n_points) + pi1*(i1*PI/n_points);
@@ -255,20 +253,20 @@ bool WormholeView::get_texture_array(uint8_t* texture, float look_th=PI/2, float
 
             // Convert the angles back to the 'look' reference frame
             float th_prime = acos(sin(th_tilde_prime)*sin(phi_tilde_prime));
-            float phi_prime = interval_mod(atan2(sin(th_tilde_prime)*cos(phi_tilde_prime)),cos(th_tilde_prime)), 0, 2*PI);
+            float phi_prime = interval_mod(atan2(sin(th_tilde_prime)*cos(phi_tilde_prime),cos(th_tilde_prime)), 0, 2*PI);
 
             // pixel of the current look angle
             // uint8_t pixel[_sky1.channels];
             uint8_t pixel1[_sky1.__channels];
             uint8_t pixel2[_sky2.__channels];
             
-            sky1.get_pixel(phi_prime,th_prime,pixel1);
-            sky2.get_pixel(phi_prime,th_prime,pixel2);
+            _sky1.get_pixel(phi_prime,th_prime,pixel1);
+            _sky2.get_pixel(phi_prime,th_prime,pixel2);
 
-            for(int k=0; k<sky1.__channels;++k){
+            for(int k=0; k<_sky1.__channels;++k){
                 // weighted pixel between horizon, if its on a switch zone
                 // pixel[k] = pixel1[k] * (sl+1)*0.5 + (1-(sl+1)*0.5) * pixel2[k];
-                texture[TEXTURE_INDEX(x, y, k, _view_width, _view_height, sky1.__channels)] = pixel1[k] * (sl+1)*0.5 + (1-(sl+1)*0.5) * pixel2[k]; 
+                texture[TEXTURE_INDEX(x, y, k, _view_width, _view_height, _sky1.__channels)] = pixel1[k] * (sl+1)*0.5 + (1-(sl+1)*0.5) * pixel2[k]; 
             }
         }
     }

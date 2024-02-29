@@ -232,7 +232,7 @@ int main(int argc, char** argv){
     const int n_coords = 6; 
     const int n_params = 5;
 
-   const float M = 10; 
+    const float M = 10; 
     const float a = 5;
     const float rho = 15; 
 

@@ -6,6 +6,13 @@
 #include <sys/types.h>
 #include <string>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+
 // a fudge parameter because I am lazy
 #ifndef SKYCUBE_FILETYPE
 #define SKYCUBE_FILETYPE ".png" 
@@ -196,14 +203,24 @@ Skybox::~Skybox(){
 // phi, th rotstion values for each face
 // operation: rotate face back to front
 
-__host__ __device__ __constant__ float rot_F[2]{0,0};
-__host__ __device__ __constant__ float rot_B[2]{-PI, 0};
- 
-__host__ __device__ __constant__ float rot_R[2]{PI/2, 0};
-__host__ __device__ __constant__ float rot_L[2]{-PI/2, 0};
+const float h_rot_F[2]{0,0};
+const float h_rot_B[2]{-PI, 0};
 
-__host__ __device__ __constant__ float rot_U[2]{0, PI/2};
-__host__ __device__ __constant__ float rot_D[2]{0, -PI/2};
+const float h_rot_R[2]{PI/2, 0};
+const float h_rot_L[2]{-PI/2, 0};
+
+const float h_rot_U[2]{0, PI/2};
+const float h_rot_D[2]{0, -PI/2};
+
+
+__constant__ float d_rot_F[2]{0,0};
+__constant__ float d_rot_B[2]{-PI, 0};
+
+__constant__ float d_rot_R[2]{PI/2, 0};
+__constant__ float d_rot_L[2]{-PI/2, 0};
+
+__constant__ float d_rot_U[2]{0, PI/2};
+__constant__ float d_rot_D[2]{0, -PI/2};
 
 // __constant__ float 
 
@@ -259,29 +276,29 @@ void Skybox::get_pixel(float phi, float th, uint8_t* pixel){
             // we are in UP or DOWN face
 
             if(angle_th<PI/2){ // UP
-                transformed_phi = angle_phi + rot_U[0];
-                transformed_th = angle_th + rot_U[1];
+                transformed_phi = angle_phi + h_rot_U[0];
+                transformed_th = angle_th + h_rot_U[1];
                 __img__ = __img_up;
             } else { // DOWN
-                transformed_phi = angle_phi + rot_D[0];
-                transformed_th = angle_th + rot_D[1];
+                transformed_phi = angle_phi + h_rot_D[0];
+                transformed_th = angle_th + h_rot_D[1];
                 __img__ = __img_down;
             }
         } else if(fabs(angle_phi) < PI/4) { // FRONT
-            transformed_phi = angle_phi + rot_F[0];
-            transformed_th = angle_th + rot_F[1];
+            transformed_phi = angle_phi + h_rot_F[0];
+            transformed_th = angle_th + h_rot_F[1];
             __img__ = __img_front;
         } else if(fabs(angle_phi-PI/2) < PI/4){ // RIGHT
-            transformed_phi = angle_phi + rot_R[0];
-            transformed_th = angle_th + rot_R[1];
+            transformed_phi = angle_phi + h_rot_R[0];
+            transformed_th = angle_th + h_rot_R[1];
             __img__ = __img_right;
         } else if(fabs(angle_phi+PI/2) < PI/4) { // LEFT
-            transformed_phi = angle_phi + rot_R[0];
-            transformed_th = angle_th + rot_R[1];
+            transformed_phi = angle_phi + h_rot_L[0];
+            transformed_th = angle_th + h_rot_L[1];
             __img__ = __img_left;
         } else { // BACK
-            transformed_phi = angle_phi + rot_B[0];
-            transformed_th = angle_th + rot_B[1];
+            transformed_phi = angle_phi + h_rot_B[0];
+            transformed_th = angle_th + h_rot_B[1];
             back_face = true;
             __img__ = __img_back;
         }
@@ -322,11 +339,13 @@ void Skybox::get_pixel_CUDA(float* phi, float *th, int n_points, uint8_t*pixel){
     dim3 threads = THREADS(n_points);
 
 
-    float* _d_phi, *_d_th, _d_pixel;
+    float* _d_phi, *_d_th;
+    uint8_t* _d_pixel;
     cudaMalloc( (void**) &_d_phi, sizeof(float) * n_points);
     cudaMalloc( (void**) &_d_th, sizeof(float) * n_points);
-    cudaMalloc( (void**) &_d_th, sizeof(float) * n_points*__channels);
-
+    
+    cudaMalloc( (void**) &_d_pixel, sizeof(float) * n_points*__channels);
+    
     cudaMemcpy( _d_phi, phi, sizeof(float)* n_points, cudaMemcpyHostToDevice);
     cudaMemcpy( _d_th, th, sizeof(float)* n_points, cudaMemcpyHostToDevice);
 
@@ -334,7 +353,7 @@ void Skybox::get_pixel_CUDA(float* phi, float *th, int n_points, uint8_t*pixel){
 
 
     extract_pixel_cuda<<<blocks, threads>>>(__d_img, __img_up, __img_down, __img_front, __img_back, __img_left, __img_right,
-            __width, __height, __channels, _d_phi, _d_th, n_points, _d_pixel, __offset_phi, __offset_th);
+            __width, __height, __channels, _d_phi, _d_th, n_points, _d_pixel, __offset_phi, __offset_th, __is_cube);
     gpuErrchk(cudaGetLastError(), true);
 
     cudaDeviceSynchronize();
@@ -355,13 +374,13 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
     uint8_t* _img_l, // cube left
     uint8_t* _img_r, // cube right
     int __width, int __height, int __channels,
-    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th){
+    float* phi, float* th, int n_points, uint8_t* pixel, float __offset_phi, float __offset_th, bool __is_cube){
     
     int index_x = blockIdx.x*blockDim.x+threadIdx.x;
     
 
     // almost copy paste from Skybox::get_pixel
-    float angle_phi = interval_mod(phi[index_x], + __offset_phi, -PI, PI);
+    float angle_phi = interval_mod(phi[index_x] + __offset_phi, -PI, PI);
     float angle_th = interval_mod(th[index_x] + __offset_th, 0, PI);
 
     int i=0, j=0;
@@ -409,29 +428,29 @@ __global__ void extract_pixel_cuda(uint8_t* __img, // single image
             // we are in UP or DOWN face
 
             if(angle_th<PI/2){ // UP
-                transformed_phi = angle_phi + rot_U[0];
-                transformed_th = angle_th + rot_U[1];
+                transformed_phi = angle_phi + d_rot_U[0];
+                transformed_th = angle_th + d_rot_U[1];
                 __img__ = _img_u;
             } else { // DOWN
-                transformed_phi = angle_phi + rot_D[0];
-                transformed_th = angle_th + rot_D[1];
+                transformed_phi = angle_phi + d_rot_D[0];
+                transformed_th = angle_th + d_rot_D[1];
                 __img__ = _img_d;
             }
         } else if(fabs(angle_phi) < PI/4) { // FRONT
-            transformed_phi = angle_phi + rot_F[0];
-            transformed_th = angle_th + rot_F[1];
+            transformed_phi = angle_phi + d_rot_F[0];
+            transformed_th = angle_th + d_rot_F[1];
             __img__ = _img_f;
         } else if(fabs(angle_phi-PI/2) < PI/4){ // RIGHT
-            transformed_phi = angle_phi + rot_R[0];
-            transformed_th = angle_th + rot_R[1];
+            transformed_phi = angle_phi + d_rot_R[0];
+            transformed_th = angle_th + d_rot_R[1];
             __img__ = _img_r;
         } else if(fabs(angle_phi+PI/2) < PI/4) { // LEFT
-            transformed_phi = angle_phi + rot_R[0];
-            transformed_th = angle_th + rot_R[1];
+            transformed_phi = angle_phi + d_rot_L[0];
+            transformed_th = angle_th + d_rot_L[1];
             __img__ = _img_l;
         } else { // BACK
-            transformed_phi = angle_phi + rot_B[0];
-            transformed_th = angle_th + rot_B[1];
+            transformed_phi = angle_phi + d_rot_B[0];
+            transformed_th = angle_th + d_rot_B[1];
             back_face = true;
             __img__ = _img_b;
         }
